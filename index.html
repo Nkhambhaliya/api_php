@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vortex - Premium Inventory Management System</title>
+    <!-- Google Fonts - Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Main Style -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glass-bg-decor decor-1"></div>
+    <div class="glass-bg-decor decor-2"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="brand">
+                <i class="fa-solid fa-cubes-stacked logo-icon"></i>
+                <div class="brand-text">
+                    <h1>Vortex</h1>
+                    <p>Inventory Intelligence Hub</p>
+                </div>
+            </div>
+            <div class="db-status-badge" id="db-status">
+                <span class="pulse-dot"></span>
+                <span id="db-status-text">Connecting Database...</span>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Controls -->
+        <div class="dashboard-controls glass-card">
+            <!-- Search & Filters -->
+            <div class="filters-row">
+                <div class="search-box">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input type="text" id="search-input" placeholder="Search by name, SKU, description...">
+                </div>
+
+                <div class="filter-group">
+                    <div class="select-wrapper">
+                        <i class="fa-solid fa-tags select-icon"></i>
+                        <select id="category-filter">
+                            <option value="">All Categories</option>
+                        </select>
+                    </div>
+
+                    <div class="price-range">
+                        <input type="number" id="min-price-input" placeholder="Min Price ($)" min="0" step="0.01">
+                        <span class="range-divider">to</span>
+                        <input type="number" id="max-price-input" placeholder="Max Price ($)" min="0" step="0.01">
+                    </div>
+
+                    <button class="btn btn-secondary" id="reset-filters-btn" title="Reset Filters">
+                        <i class="fa-solid fa-filter-circle-xmark"></i>
+                    </button>
+                </div>
+
+                <button class="btn btn-primary" id="open-add-modal-btn">
+                    <i class="fa-solid fa-plus"></i> Add Item
+                </button>
+            </div>
+        </div>
+
+        <!-- Inventory List / Table -->
+        <div class="inventory-table-container glass-card">
+            <table class="inventory-table" id="inventory-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th>Stock Qty</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="inventory-tbody">
+                    <!-- Loaded dynamically via JavaScript -->
+                    <tr>
+                        <td colspan="6" class="loading-state">
+                            <div class="spinner"></div>
+                            <p>Loading inventory data...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination Section -->
+        <div class="pagination-container glass-card">
+            <div class="pagination-info" id="pagination-info">
+                Showing 0-0 of 0 items
+            </div>
+            
+            <div class="pagination-controls">
+                <div class="limit-selector select-wrapper">
+                    <select id="limit-select">
+                        <option value="5">5 per page</option>
+                        <option value="10" selected>10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50">50 per page</option>
+                    </select>
+                </div>
+                
+                <div class="pagination-pages" id="pagination-pages">
+                    <!-- Page buttons loaded dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW DETAILS MODAL -->
+    <div class="modal-overlay" id="details-modal">
+        <div class="modal-content glass-card large-modal animate-slide-in">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-circle-info"></i> Item Specification</h2>
+                <button class="close-modal-btn" data-close="details-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="details-modal-body">
+                <!-- Dynamically injected -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-close="details-modal">Close</button>
+                <button class="btn btn-primary" id="edit-from-details-btn">
+                    <i class="fa-solid fa-pen-to-square"></i> Edit Details
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD ITEM MODAL -->
+    <div class="modal-overlay" id="add-modal">
+        <div class="modal-content glass-card animate-slide-in">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-circle-plus"></i> Add New Inventory Item</h2>
+                <button class="close-modal-btn" data-close="add-modal">&times;</button>
+            </div>
+            <form id="add-item-form">
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-name">Product Name *</label>
+                            <input type="text" id="add-name" required placeholder="e.g. Ergonomic Office Chair">
+                        </div>
+                        <div class="form-group">
+                            <label for="add-sku">SKU Code *</label>
+                            <input type="text" id="add-sku" required placeholder="e.g. CH-ERG-88" style="text-transform: uppercase;">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-category">Category</label>
+                            <input type="text" id="add-category" placeholder="e.g. Furniture, Electronics">
+                        </div>
+                        <div class="form-group">
+                            <label for="add-price">Price ($) *</label>
+                            <input type="number" id="add-price" required min="0" step="0.01" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label for="add-quantity">Initial Stock Quantity *</label>
+                            <input type="number" id="add-quantity" required min="0" step="1" placeholder="0">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="add-description">Description / Technical Specifications</label>
+                        <textarea id="add-description" rows="4" placeholder="Describe the item's dimensions, color, weight capacity, warranty..."></textarea>
+                    </div>
+                    
+                    <div class="error-msg" id="add-error-msg"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="add-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- EDIT ITEM MODAL -->
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal-content glass-card animate-slide-in">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-pen-to-square"></i> Modify Item Specification</h2>
+                <button class="close-modal-btn" data-close="edit-modal">&times;</button>
+            </div>
+            <form id="edit-item-form">
+                <input type="hidden" id="edit-id">
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-name">Product Name *</label>
+                            <input type="text" id="edit-name" required placeholder="Product Name">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-sku">SKU Code *</label>
+                            <input type="text" id="edit-sku" required placeholder="SKU Code" style="text-transform: uppercase;">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-category">Category</label>
+                            <input type="text" id="edit-category" placeholder="Category">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-price">Price ($) *</label>
+                            <input type="number" id="edit-price" required min="0" step="0.01" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-quantity">Stock Quantity *</label>
+                            <input type="number" id="edit-quantity" required min="0" step="1" placeholder="0">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-description">Description / Technical Specifications</label>
+                        <textarea id="edit-description" rows="4" placeholder="Description"></textarea>
+                    </div>
+                    
+                    <div class="error-msg" id="edit-error-msg"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="edit-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification Toast System -->
+    <div id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
