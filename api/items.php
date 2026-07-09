@@ -13,27 +13,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/../config/db.php';
 
-$database = Database::getInstance();
-$db = $database->getConnection();
-$driverName = $database->getDriverName();
-
+$db = Database::getInstance();
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
-        if (isset($_GET['id'])) {
-            getItemDetails($db, (int)$_GET['id']);
+        if (isset($_GET['id']) && $_GET['id'] !== '') {
+            getItemDetails($db, $_GET['id']);
         } else {
             getItemsList($db);
         }
         break;
 
     case 'POST':
-        createItem($db, $driverName);
+        createItem($db);
         break;
 
     case 'PUT':
-        updateItem($db, $driverName);
+        updateItem($db);
         break;
 
     case 'DELETE':
@@ -51,9 +48,7 @@ switch ($method) {
  */
 function getItemDetails($db, $id) {
     try {
-        $stmt = $db->prepare("SELECT * FROM items WHERE id = ?");
-        $stmt->execute([$id]);
-        $item = $stmt->fetch();
+        $item = $db->getItemById($id);
 
         if ($item) {
             http_response_code(200);
@@ -68,7 +63,7 @@ function getItemDetails($db, $id) {
                 "message" => "Item not found"
             ]);
         }
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
@@ -83,80 +78,31 @@ function getItemsList($db) {
         $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 10;
         $offset = isset($_GET['offset']) ? max(0, (int)$_GET['offset']) : 0;
 
-        // Filtering conditions
-        $conditions = [];
-        $params = [];
+        // Build filters array
+        $filters = [
+            'search' => isset($_GET['search']) ? trim($_GET['search']) : '',
+            'category' => isset($_GET['category']) ? trim($_GET['category']) : '',
+            'min_price' => isset($_GET['min_price']) && $_GET['min_price'] !== '' ? (float)$_GET['min_price'] : '',
+            'max_price' => isset($_GET['max_price']) && $_GET['max_price'] !== '' ? (float)$_GET['max_price'] : ''
+        ];
 
-        // Search in Name, SKU, or Description
-        if (!empty($_GET['search'])) {
-            $search = '%' . $_GET['search'] . '%';
-            $conditions[] = "(name LIKE :search OR sku LIKE :search2 OR description LIKE :search3)";
-            $params[':search'] = $search;
-            $params[':search2'] = $search;
-            $params[':search3'] = $search;
-        }
-
-        // Category filter
-        if (!empty($_GET['category'])) {
-            $conditions[] = "category = :category";
-            $params[':category'] = $_GET['category'];
-        }
-
-        // Price range filters
-        if (isset($_GET['min_price']) && $_GET['min_price'] !== '') {
-            $conditions[] = "price >= :min_price";
-            $params[':min_price'] = (float)$_GET['min_price'];
-        }
-        if (isset($_GET['max_price']) && $_GET['max_price'] !== '') {
-            $conditions[] = "price <= :max_price";
-            $params[':max_price'] = (float)$_GET['max_price'];
-        }
-
-        // Build WHERE clause
-        $whereClause = "";
-        if (count($conditions) > 0) {
-            $whereClause = "WHERE " . implode(" AND ", $conditions);
-        }
-
-        // 1. Get total matching count
-        $countSql = "SELECT COUNT(*) as total FROM items $whereClause";
-        $countStmt = $db->prepare($countSql);
-        foreach ($params as $key => $val) {
-            $countStmt->bindValue($key, $val);
-        }
-        $countStmt->execute();
-        $total = (int)$countStmt->fetch()['total'];
-
-        // 2. Get items with pagination
-        // Using explicit binding for LIMIT and OFFSET to ensure SQLite and MySQL compatibility
-        $sql = "SELECT * FROM items $whereClause ORDER BY id DESC LIMIT :limit OFFSET :offset";
-        $stmt = $db->prepare($sql);
-        foreach ($params as $key => $val) {
-            $stmt->bindValue($key, $val);
-        }
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $items = $stmt->fetchAll();
-
-        // 3. Extract unique categories for filter options
-        $catStmt = $db->query("SELECT DISTINCT category FROM items WHERE category IS NOT NULL AND category != '' ORDER BY category ASC");
-        $categories = $catStmt->fetchAll(PDO::FETCH_COLUMN);
+        // Fetch query details
+        $result = $db->queryItems($filters, $limit, $offset);
 
         http_response_code(200);
         echo json_encode([
             "status" => "success",
-            "data" => $items,
-            "categories" => $categories,
+            "data" => $result['items'],
+            "categories" => $result['categories'],
             "pagination" => [
-                "total" => $total,
+                "total" => $result['total'],
                 "limit" => $limit,
                 "offset" => $offset,
-                "count" => count($items)
+                "count" => count($result['items'])
             ]
         ]);
 
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
@@ -165,7 +111,7 @@ function getItemsList($db) {
 /**
  * POST Create New Item
  */
-function createItem($db, $driverName) {
+function createItem($db) {
     try {
         $input = json_decode(file_get_contents('php://input'), true);
 
@@ -190,37 +136,22 @@ function createItem($db, $driverName) {
         }
 
         // Check if SKU already exists
-        $checkStmt = $db->prepare("SELECT id FROM items WHERE sku = ?");
-        $checkStmt->execute([$sku]);
-        if ($checkStmt->fetch()) {
+        if ($db->checkSkuExists($sku)) {
             http_response_code(409);
             echo json_encode(["status" => "error", "message" => "SKU '$sku' already exists. SKU must be unique."]);
             return;
         }
 
-        // Insert
-        $sql = "INSERT INTO items (name, sku, description, price, quantity, category, created_at, updated_at) 
-                VALUES (:name, :sku, :description, :price, :quantity, :category, :created_at, :updated_at)";
-        
-        $now = date('Y-m-d H:i:s');
-        $stmt = $db->prepare($sql);
-        $stmt->execute([
-            ':name' => $name,
-            ':sku' => $sku,
-            ':description' => $description,
-            ':price' => $price,
-            ':quantity' => $quantity,
-            ':category' => $category,
-            ':created_at' => $now,
-            ':updated_at' => $now
-        ]);
-
-        $newId = $db->lastInsertId();
-
-        // Retrieve created item
-        $getStmt = $db->prepare("SELECT * FROM items WHERE id = ?");
-        $getStmt->execute([$newId]);
-        $newItem = $getStmt->fetch();
+        // Save
+        $data = [
+            'name' => $name,
+            'sku' => $sku,
+            'description' => $description,
+            'price' => $price,
+            'quantity' => $quantity,
+            'category' => $category
+        ];
+        $newItem = $db->createItem($data);
 
         http_response_code(201);
         echo json_encode([
@@ -229,7 +160,7 @@ function createItem($db, $driverName) {
             "data" => $newItem
         ]);
 
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
@@ -238,21 +169,18 @@ function createItem($db, $driverName) {
 /**
  * PUT Update Existing Item
  */
-function updateItem($db, $driverName) {
+function updateItem($db) {
     try {
-        $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+        $id = isset($_GET['id']) ? $_GET['id'] : '';
 
-        if ($id <= 0) {
+        if ($id === '') {
             http_response_code(400);
             echo json_encode(["status" => "error", "message" => "Invalid or missing Item ID."]);
             return;
         }
 
         // Verify item exists
-        $checkStmt = $db->prepare("SELECT * FROM items WHERE id = ?");
-        $checkStmt->execute([$id]);
-        $existingItem = $checkStmt->fetch();
-
+        $existingItem = $db->getItemById($id);
         if (!$existingItem) {
             http_response_code(404);
             echo json_encode(["status" => "error", "message" => "Item not found."]);
@@ -261,7 +189,7 @@ function updateItem($db, $driverName) {
 
         $input = json_decode(file_get_contents('php://input'), true);
 
-        // Extract fields, falling back to existing data if not provided
+        // Extract fields
         $name = isset($input['name']) ? trim($input['name']) : $existingItem['name'];
         $sku = isset($input['sku']) ? strtoupper(trim($input['sku'])) : $existingItem['sku'];
         $description = isset($input['description']) ? trim($input['description']) : $existingItem['description'];
@@ -282,45 +210,25 @@ function updateItem($db, $driverName) {
             return;
         }
 
-        // Check if SKU is changed and already exists on another item
+        // Check SKU unique if modified
         if ($sku !== $existingItem['sku']) {
-            $skuCheck = $db->prepare("SELECT id FROM items WHERE sku = ? AND id != ?");
-            $skuCheck->execute([$sku, $id]);
-            if ($skuCheck->fetch()) {
+            if ($db->checkSkuExists($sku, $id)) {
                 http_response_code(409);
                 echo json_encode(["status" => "error", "message" => "SKU '$sku' is already taken by another item."]);
                 return;
             }
         }
 
-        // Update statement
-        $now = date('Y-m-d H:i:s');
-        $sql = "UPDATE items SET 
-                name = :name, 
-                sku = :sku, 
-                description = :description, 
-                price = :price, 
-                quantity = :quantity, 
-                category = :category, 
-                updated_at = :updated_at 
-                WHERE id = :id";
-        
-        $stmt = $db->prepare($sql);
-        $stmt->execute([
-            ':name' => $name,
-            ':sku' => $sku,
-            ':description' => $description,
-            ':price' => $price,
-            ':quantity' => $quantity,
-            ':category' => $category,
-            ':updated_at' => $now,
-            ':id' => $id
-        ]);
-
-        // Fetch updated item
-        $getStmt = $db->prepare("SELECT * FROM items WHERE id = ?");
-        $getStmt->execute([$id]);
-        $updatedItem = $getStmt->fetch();
+        // Update
+        $data = [
+            'name' => $name,
+            'sku' => $sku,
+            'description' => $description,
+            'price' => $price,
+            'quantity' => $quantity,
+            'category' => $category
+        ];
+        $updatedItem = $db->updateItem($id, $data);
 
         http_response_code(200);
         echo json_encode([
@@ -329,7 +237,7 @@ function updateItem($db, $driverName) {
             "data" => $updatedItem
         ]);
 
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
@@ -340,26 +248,24 @@ function updateItem($db, $driverName) {
  */
 function deleteItem($db) {
     try {
-        $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+        $id = isset($_GET['id']) ? $_GET['id'] : '';
 
-        if ($id <= 0) {
+        if ($id === '') {
             http_response_code(400);
             echo json_encode(["status" => "error", "message" => "Invalid or missing Item ID."]);
             return;
         }
 
         // Verify item exists
-        $checkStmt = $db->prepare("SELECT id FROM items WHERE id = ?");
-        $checkStmt->execute([$id]);
-        if (!$checkStmt->fetch()) {
+        $existingItem = $db->getItemById($id);
+        if (!$existingItem) {
             http_response_code(404);
             echo json_encode(["status" => "error", "message" => "Item not found."]);
             return;
         }
 
         // Delete
-        $stmt = $db->prepare("DELETE FROM items WHERE id = ?");
-        $stmt->execute([$id]);
+        $db->deleteItem($id);
 
         http_response_code(200);
         echo json_encode([
@@ -367,7 +273,7 @@ function deleteItem($db) {
             "message" => "Item deleted successfully."
         ]);
 
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
