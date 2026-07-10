@@ -1,80 +1,104 @@
-VORTEX INVENTORY MANAGEMENT SYSTEM - API TEST HANDBOOK
-======================================================
-Base Endpoint URL (XAMPP Server): http://localhost/api_php/api/items.php
+VORTEX INVENTORY MANAGEMENT SYSTEM - API TEST HANDBOOK (WITH AUTHENTICATION)
+=============================================================================
+Base URL: http://localhost/api_php/api
 
-1. GET INVENTORY LIST (PAGINATED)
----------------------------------
-Retrieves products. Supports optional URL parameters for pagination:
-* Fetch Base List (Default 10 items):
-  GET http://localhost/api_php/api/items.php
-
-* Fetch 5 items starting from the beginning (Page 1):
-  GET http://localhost/api_php/api/items.php?limit=5&offset=0
-
-* Fetch next 5 items (Page 2):
-  GET http://localhost/api_php/api/items.php?limit=5&offset=5
-
-
-2. INVENTORY FILTERING & SEARCH
-------------------------------
-Filter list items by adding query keys to the URL:
-* Search by name, SKU, or description:
-  GET http://localhost/api_php/api/items.php?search=mouse
-
-* Filter exact Category:
-  GET http://localhost/api_php/api/items.php?category=Furniture
-
-* Filter Price Range (Items between $30 and $100):
-  GET http://localhost/api_php/api/items.php?min_price=30&max_price=100
-
-* Combine Search, Category, and Price Range filters:
-  GET http://localhost/api_php/api/items.php?search=keyboard&category=Electronics&min_price=50
-
-
-3. GET ITEM DETAILS
--------------------
-Fetches specification details for a specific item using its unique ID:
-  GET http://localhost/api_php/api/items.php?id=1
-
-
-4. CREATE PRODUCT (POST)
-------------------------
-Creates a new product record. Must send header "Content-Type: application/json".
+1. REGISTER AN ACCOUNT (POST)
+-----------------------------
+Creates a new user. The password is encrypted and saved securely.
 * Request Route:
+  POST http://localhost/api_php/api/register.php
+
+* Headers:
+  Content-Type: application/json
+
+* Request JSON Body:
+{
+  "username": "nikhil_admin",
+  "password": "my_secure_password_123"
+}
+
+
+2. USER LOGIN / GET SESSION TOKEN (POST)
+---------------------------------------
+Verifies user credentials. On success, issues a unique cryptographically secure bearer token valid for 8 hours.
+* Request Route:
+  POST http://localhost/api_php/api/login.php
+
+* Headers:
+  Content-Type: application/json
+
+* Request JSON Body:
+{
+  "username": "nikhil_admin",
+  "password": "my_secure_password_123"
+}
+
+* Success Response:
+{
+  "status": "success",
+  "message": "Logged in successfully.",
+  "data": {
+    "username": "nikhil_admin",
+    "access_token": "a1b2c3d4e5f6...",
+    "token_type": "Bearer",
+    "expires_at": "2026-07-10 18:00:00"
+  }
+}
+
+
+3. USER LOGOUT / INVALIDATE SESSION (POST)
+------------------------------------------
+Invalidates the active session token in the database. Requires Authorization header.
+* Request Route:
+  POST http://localhost/api_php/api/logout.php
+
+* Headers:
+  Authorization: Bearer <your_access_token_here>
+  Content-Type: application/json
+
+
+4. AUTHENTICATED INVENTORY OPERATIONS
+-------------------------------------
+All requests to items.php MUST include the "Authorization: Bearer <token>" header.
+
+* Fetch Inventory List:
+  GET http://localhost/api_php/api/items.php
+  Headers -> Authorization: Bearer <your_access_token_here>
+
+* Filter List (Search & Category):
+  GET http://localhost/api_php/api/items.php?search=mouse&category=Electronics
+  Headers -> Authorization: Bearer <your_access_token_here>
+
+* Get Item Details:
+  GET http://localhost/api_php/api/items.php?id=1
+  Headers -> Authorization: Bearer <your_access_token_here>
+
+* Create Product (POST):
   POST http://localhost/api_php/api/items.php
+  Headers -> 
+    Authorization: Bearer <your_access_token_here>
+    Content-Type: application/json
+  Body ->
+  {
+    "name": "Smart Watch Series X",
+    "sku": "SW-SERX-08",
+    "description": "Fitness tracking smartwatch.",
+    "price": 199.99,
+    "quantity": 80,
+    "category": "Electronics"
+  }
 
-* Headers:
-  Content-Type: application/json
-
-* Request JSON Body:
-{
-  "name": "Smart Watch Series X",
-  "sku": "SW-SERX-08",
-  "description": "Fitness tracking smartwatch with 1.8 inch AMOLED display.",
-  "price": 199.99,
-  "quantity": 80,
-  "category": "Electronics"
-}
-
-
-5. UPDATE PRODUCT (PUT)
------------------------
-Modifies existing product details. Supports partial updates (only send fields to change).
-* Request Route (Replace "1" with target item ID):
+* Update Product (PUT):
   PUT http://localhost/api_php/api/items.php?id=1
+  Headers -> 
+    Authorization: Bearer <your_access_token_here>
+    Content-Type: application/json
+  Body ->
+  {
+    "price": 44.99,
+    "quantity": 115
+  }
 
-* Headers:
-  Content-Type: application/json
-
-* Request JSON Body:
-{
-  "price": 44.99,
-  "quantity": 115
-}
-
-
-6. DELETE PRODUCT (DELETE)
---------------------------
-Deletes an item from the database.
-* Request Route (Replace "1" with target item ID):
+* Delete Product (DELETE):
   DELETE http://localhost/api_php/api/items.php?id=1
+  Headers -> Authorization: Bearer <your_access_token_here>

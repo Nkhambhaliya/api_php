@@ -119,6 +119,17 @@ class Database {
         );";
         $this->connection->exec($sql);
 
+        $userSql = "CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            token TEXT,
+            token_expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );";
+        $this->connection->exec($userSql);
+
+
         // Auto-seed table if SQLite DB is completely fresh
         $stmt = $this->connection->query("SELECT COUNT(*) as count FROM items");
         $row = $stmt->fetch();
@@ -503,4 +514,142 @@ class Database {
             return true;
         }
     }
+
+    /**
+     * Create user (hashing is already handled in register.php)
+     */
+    public function createUser($username, $hashedPassword) {
+        $now = date('Y-m-d H:i:s');
+        if ($this->driver === 'mysql' || $this->driver === 'sqlite') {
+            $sql = "INSERT INTO users (username, password, created_at) VALUES (:username, :password, :created_at)";
+            $stmt = $this->connection->prepare($sql);
+            $stmt->execute([
+                ':username' => $username,
+                ':password' => $hashedPassword,
+                ':created_at' => $now
+            ]);
+            return true;
+        }
+
+        if ($this->driver === 'mongodb') {
+            $dbName = getenv('MONGODB_DB') ?: 'inventory_db';
+            $namespace = "$dbName.users";
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->insert([
+                'username' => $username,
+                'password' => $hashedPassword,
+                'token' => null,
+                'token_expires_at' => null,
+                'created_at' => $now
+            ]);
+            $this->connection->executeBulkWrite($namespace, $bulk);
+            return true;
+        }
+    }
+
+    /**
+     * Get user by username
+     */
+    public function getUserByUsername($username) {
+        if ($this->driver === 'mysql' || $this->driver === 'sqlite') {
+            $stmt = $this->connection->prepare("SELECT * FROM users WHERE username = ?");
+            $stmt->execute([$username]);
+            return $stmt->fetch() ?: null;
+        }
+
+        if ($this->driver === 'mongodb') {
+            $dbName = getenv('MONGODB_DB') ?: 'inventory_db';
+            $namespace = "$dbName.users";
+            $query = new MongoDB\Driver\Query(['username' => $username], ['limit' => 1]);
+            $cursor = $this->connection->executeQuery($namespace, $query);
+            $rows = $cursor->toArray();
+            if (count($rows) > 0) {
+                $user = (array)$rows[0];
+                if (isset($user['_id'])) {
+                    $user['id'] = (string)$user['_id'];
+                    unset($user['_id']);
+                }
+                return $user;
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Update active login token for a user
+     */
+    public function updateUserToken($userId, $token, $expiresAt) {
+        if ($this->driver === 'mysql' || $this->driver === 'sqlite') {
+            $stmt = $this->connection->prepare("UPDATE users SET token = ?, token_expires_at = ? WHERE id = ?");
+            $stmt->execute([$token, $expiresAt, $userId]);
+            return true;
+        }
+
+        if ($this->driver === 'mongodb') {
+            $dbName = getenv('MONGODB_DB') ?: 'inventory_db';
+            $namespace = "$dbName.users";
+            try {
+                $mongoFilter = ['_id' => new MongoDB\BSON\ObjectId($userId)];
+            } catch (Exception $e) {
+                $mongoFilter = ['_id' => $userId];
+            }
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->update($mongoFilter, ['$set' => ['token' => $token, 'token_expires_at' => $expiresAt]]);
+            $this->connection->executeBulkWrite($namespace, $bulk);
+            return true;
+        }
+    }
+
+    /**
+     * Retrieve user details based on active token and verify expiration
+     */
+    public function getUserByToken($token) {
+        $now = date('Y-m-d H:i:s');
+        if ($this->driver === 'mysql' || $this->driver === 'sqlite') {
+            $stmt = $this->connection->prepare("SELECT * FROM users WHERE token = ? AND token_expires_at > ?");
+            $stmt->execute([$token, $now]);
+            return $stmt->fetch() ?: null;
+        }
+
+        if ($this->driver === 'mongodb') {
+            $dbName = getenv('MONGODB_DB') ?: 'inventory_db';
+            $namespace = "$dbName.users";
+            $query = new MongoDB\Driver\Query([
+                'token' => $token,
+                'token_expires_at' => ['$gt' => $now]
+            ], ['limit' => 1]);
+            $cursor = $this->connection->executeQuery($namespace, $query);
+            $rows = $cursor->toArray();
+            if (count($rows) > 0) {
+                $user = (array)$rows[0];
+                if (isset($user['_id'])) {
+                    $user['id'] = (string)$user['_id'];
+                    unset($user['_id']);
+                }
+                return $user;
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Invalidate user session token on logout
+     */
+    public function clearUserToken($token) {
+        if ($this->driver === 'mysql' || $this->driver === 'sqlite') {
+            $stmt = $this->connection->prepare("UPDATE users SET token = NULL, token_expires_at = NULL WHERE token = ?");
+            $stmt->execute([$token]);
+            return true;
+        }
+
+        if ($this->driver === 'mongodb') {
+            $dbName = getenv('MONGODB_DB') ?: 'inventory_db';
+            $namespace = "$dbName.users";
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->update(['token' => $token], ['$set' => ['token' => null, 'token_expires_at' => null]]);
+            $this->connection->executeBulkWrite($namespace, $bulk);
+            return true;
+        }
+    }
 }
+

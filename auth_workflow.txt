@@ -1,0 +1,80 @@
+VORTEX INVENTORY MANAGEMENT SYSTEM - AUTHENTICATION WORKFLOW HANDBOOK
+=====================================================================
+
+This document explains the security architecture, database schemas, encryption algorithms,
+and session validation workflows introduced into the Vortex Inventory PHP REST API.
+
+
+1. ARCHITECTURE OVERVIEW & SEPARATION OF CONCERNS
+-------------------------------------------------
+The API is divided into clean logical layers to separate credentials processing from business data operations:
+
+  [Client Request] ──(Authentication Header)──> [api/items.php (Controller)]
+                                                           │
+                                                (Checks authorization)
+                                                           ▼
+  [Database Server] <───────(Operations)─────── [config/auth.php (Guard)]
+                                                           │
+                                                (Validates Session Token)
+                                                           ▼
+                                                [config/db.php (Repository)]
+
+
+2. SECURE PASSWORD ENCRYPTION (BCrypt)
+--------------------------------------
+* Location: api/register.php
+* Mechanism: Standard one-way cryptographic hashing.
+* Implementation: We use PHP's built-in `password_hash($password, PASSWORD_BCRYPT)` function. 
+  BCrypt automatically generates a unique cryptographically secure random salt for every user and
+  calculates a secure hash.
+* Safety: Because hashing is one-way, even if database access is compromised, raw passwords cannot 
+  be decrypted.
+
+
+3. AUTHENTICATION SCHEMAS
+-------------------------
+* SQLite (Auto-initialized in config/db.php):
+  Creates a "users" table containing:
+  - id: INTEGER (Primary Key Auto-Increment)
+  - username: TEXT (Unique, Alphanumeric lookup index)
+  - password: TEXT (BCrypt hashed string)
+  - token: TEXT (Active session token)
+  - token_expires_at: DATETIME (Expiration window timestamp)
+  - created_at: DATETIME (Registration timestamp)
+
+* MySQL / MariaDB (config/schema.sql):
+  Declares matching table fields with InnoDB storage engine structures and custom indexes for tokens search performance.
+
+
+4. ENDPOINT WORKFLOWS
+---------------------
+
+A. Registration (POST /api/register.php)
+   1. Client submits JSON payload containing "username" and "password".
+   2. The API validates formatting (username must be alphanumeric, password must be >= 6 characters).
+   3. The database checks if the username is already taken.
+   4. Password is encrypted using BCrypt.
+   5. The record is inserted into the "users" table. Returns 201 Created.
+
+B. Login / Token Issuance (POST /api/login.php)
+   1. Client submits "username" and "password".
+   2. Database retrieves the user by username.
+   3. password_verify($password, $user['password']) verifies the hashed password matches the input.
+   4. On success, a cryptographically secure random session token is generated using:
+      bin2hex(random_bytes(32)) -> Produces a unique 64-character hexadecimal session identifier.
+   5. Expiration is set to 8 hours from creation (e.g. Current Time + 28800 seconds).
+   6. Token and expiration are stored in the database for that user.
+   7. The token is returned to the client. Returns 200 OK.
+
+C. Authorization Guard (config/auth.php)
+   1. All requests to /api/items.php automatically trigger the requireAuth() middleware.
+   2. It extracts the authorization token from request headers (looks for "Authorization: Bearer <token>").
+      *Note: Includes custom header mapping for Apache/XAMPP environments where authorization headers get stripped.*
+   3. Queries the database to find the user possessing that token.
+   4. Verifies the token has not expired (current time is less than token_expires_at).
+   5. If valid, the request proceeds. If missing, invalid, or expired, returns 401 Unauthorized and terminates execution immediately.
+
+D. Logout / Invalidation (POST /api/logout.php)
+   1. Validates the request using the Authorization Guard.
+   2. Clears the session token by setting `token = NULL` and `token_expires_at = NULL` in the database.
+   3. The token is instantly expired and can never be used again. Returns 200 OK.

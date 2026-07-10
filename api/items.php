@@ -12,8 +12,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/auth.php';
 
 $db = Database::getInstance();
+
+// Require authorization for all inventory items API requests
+$currentUser = requireAuth($db);
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {

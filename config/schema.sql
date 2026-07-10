@@ -29,3 +29,15 @@ INSERT INTO `items` (`name`, `sku`, `description`, `price`, `quantity`, `categor
 ('Leather Portfolio Notebook', 'NB-LTH-08', 'Premium refillable A5 leather journal for writing and drawing.', 19.99, 300, 'Office Supplies'),
 ('Smart LED Desk Lamp', 'LP-LED-09', 'Dimmable eye-caring desk light with USB charging port and 5 color modes.', 39.99, 90, 'Furniture'),
 ('Bluetooth Trackball Mouse', 'MS-TRK-10', 'Ergonomic trackball mouse with adjustable DPI and rechargeable battery.', 59.99, 50, 'Electronics');
+
+-- Create Users Table for Authentication
+CREATE TABLE IF NOT EXISTS `users` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `username` VARCHAR(100) NOT NULL UNIQUE,
+    `password` VARCHAR(255) NOT NULL,
+    `token` VARCHAR(255) NULL,
+    `token_expires_at` TIMESTAMP NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_token` (`token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
